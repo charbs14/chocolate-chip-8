@@ -4,6 +4,7 @@
 #include "chip8.h"
 #include <iostream>
 #include <stdint>
+#include <unistd.h>
 #include <stdio>
 
 	uint8_t mem[4096] = {//4kb of mem, initialized with fonts 
@@ -27,7 +28,7 @@
 	
 	};
 
-	uint8_t display[64 * 32];  //64 * 32 pixel display
+	uint8_t display[64][32];  //64 * 32 pixel display
 					
 					
 	uint16_t pc = 0x200; //program counter, begins at 0x200 in mem since 
@@ -62,7 +63,7 @@
 		}
 		
 		rewind(rom);
-		fread(&mem[0x200],sizeof(uint16_t),rom_size, rom);
+		fread(&mem[0x200],sizeof(uint8_t),rom_size, rom);
 		fclose(rom);
 
 		return;
@@ -79,11 +80,49 @@
 			exit(EXIT_FAILURE);
 		}
 		
-		load_rom(argv[1]);
+		load_rom(argv[1]); //load rom into memory 
 
 
 		while(!exit){
+			//fetch instructions 
+			uint16_t instruction = mem[pc] + mem[pc + 1]; //instruction is two bytes from memory 
+			pc += 2;
 
+			//decode instruction, first break into nibbles
+			uint8_t nib1 = (instruction & 0xF000) >> 12;
+			uint8_t nib2 = (instruction & 0x0F00) >> 8;
+			uint8_t nib3 = (instruction & 0x00F0) >> 4;
+			uint8_t nib4 = (instruction & 0x000F);
+
+			switch(nib1){
+				case 0x0:
+					if(instruction == 0x00E0){//clear screen 
+						memset(display, 0, sizeof(display)); 	
+					}
+					
+					break;
+
+				case 0x1://jump instruction 
+					pc = (instruction & 0x0FFF);
+					break;
+				case 0x6://set register value
+					V[nib2] = (instruction & 0x00FF);	
+					break;
+				case 0x7://add immediate to register
+					V[nib2] += (instruction & 0x00FF);
+					break;
+				case 0xA://set index register
+					i = (instruction & 0x0FFF);		
+					break;
+				case 0xD://display
+						
+					break;
+
+			}
+
+
+		
+			sleep(1/700);
 		}
 
 
