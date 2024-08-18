@@ -118,8 +118,18 @@
 				break;
 
 			case 0x7://add immediate to register
-				V[nib2] += (instruction & 0x00FF);
+				{
+				uint8_t number = (instruction & 0x00FF);
+
+				if(number == 0xFF){
+					V[nib2] += 1;
+				}else{
+					V[nib2] += (instruction & 0x00FF);
+				}
+
 				break;
+
+				}
 
 			case 0xA://set index register
 				i = (instruction & 0x0FFF);		
@@ -135,7 +145,7 @@
 					uint8_t xPos = V[nib2] & 63;
 
 					for(int pixel = 0; pixel < 8; pixel++){
-						uint16_t index = 64 * yPos + xPos;
+						uint16_t index = (64 * yPos) + xPos;
 
 						if(display[index] && ((getPixel & currByte)) >> (7 - pixel))//pixel is turned off
 							V[15] = 1;
@@ -148,9 +158,9 @@
 						getPixel = (getPixel >> 1);
 					}
 
-					yPos++;
 					if (yPos == 31) 
 						break;
+					yPos++;
  
 				 }
 				displayUpdated = 1;
@@ -165,6 +175,9 @@
 		}
 		return displayUpdated;
 }
+	void here(){
+		return;
+	}
 
 	int main ( int argc, char* argv[]){
 		
@@ -187,7 +200,7 @@
 
 		  }
 
-		SDL_Window *win = SDL_CreateWindow("chip8",SDL_WINDOWPOS_CENTERED,SDL_WINDOWPOS_CENTERED,640,320,0);
+		SDL_Window *win = SDL_CreateWindow("chip8",SDL_WINDOWPOS_CENTERED,SDL_WINDOWPOS_CENTERED,640,480,0);
 		
 		printf("\nWindow Created!");
 
@@ -223,6 +236,10 @@
 		SDL_Event e;
 		struct timespec start, end;
 
+		SDL_Rect big_pixel;
+		big_pixel.w = 10;
+		big_pixel.h = 10;
+
 		while(!quit){
 			while(SDL_PollEvent(&e)){
 				if(e.type == SDL_QUIT){
@@ -234,6 +251,25 @@
 
 			bool displayUpdated = emulate_cycle();
 
+			here();
+
+			if(displayUpdated){
+
+				SDL_SetRenderDrawColor(rend,0,0,0,1);
+				SDL_RenderClear(rend);
+				SDL_SetRenderDrawColor(rend,255,255,255,1);
+
+				for (int i = 0; i < (64 * 32); i++){
+					if(display[i]){
+						big_pixel.x = (i % 64)* 10;
+						big_pixel.y = (i / 32)* 5;
+						SDL_RenderDrawRect(rend, &big_pixel);
+						SDL_RenderFillRect(rend, &big_pixel);
+					}
+				}
+				SDL_RenderPresent(rend);
+			}
+
 			clock_gettime(CLOCK_MONOTONIC, &end);
 
 			if(onesecond > (1/1e9) && delay > 0){
@@ -243,31 +279,16 @@
 			
 			elapsed = (( end.tv_sec - start.tv_sec ) + (( end.tv_nsec - start.tv_nsec ) ) / 1e9);
 			onesecond += elapsed;
-
+/*
 			if(elapsed < targetClockFrequency){
 				struct timespec sleep_time;
 				sleep_time.tv_sec = 0;
 				sleep_time.tv_nsec = ((targetClockFrequency)- elapsed) / 1e9;
-				onesecond = sleep_time.tv_nsec;
+				onesecond += sleep_time.tv_nsec;
 
-				nanosleep(&sleep_time, NULL);
+				SDL_DelayNS(sleep_time.tv_nsec);
 			}
-
-			if(displayUpdated){
-
-				SDL_SetRenderDrawColor(rend,0,0,0,1);
-				SDL_RenderClear(rend);
-				
-				SDL_SetRenderDrawColor(rend,255,255,255,1);
-				for (int i = 0; i < (64 * 32); i++){
-					if(display[i]){
-						int pixelX = i % 64;
-						int pixelY = i / 32;
-						SDL_RenderDrawPoint(rend, pixelX, pixelY);
-					}
-				}
-				SDL_RenderPresent(rend);
-			}
+*/
 
 
 
