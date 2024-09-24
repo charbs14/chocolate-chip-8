@@ -1,5 +1,4 @@
 #include <stdbool.h>
-#include "chip8.h"
 #include <stdint.h>
 #include <unistd.h>
 #include <stdio.h>
@@ -8,28 +7,10 @@
 #include <SDL_timer.h>
 #include <SDL_image.h>
 #include <time.h>
+#include "chip8.h"
 
-	
+void init_chip8(chip8* chip){
 
-	uint8_t mem[4096];
-
-	bool display[64 * 32];  //64 * 32 pixel display
-					
-	uint16_t pc = 0x200; //program counter, begins at 0x200 in mem since 
-			     //interpreters were usually stored before that address
-	
-	uint16_t i = 0; //index register used to point at locations in memory
-
-	uint16_t stack[128]; //stack for subroutines and functions
-				   
-	uint8_t delay = 60; //delay timer, decremented 60 times per sec until it reaches 0
-			    
-	uint8_t sound = 0; //sound timer which gives off beeping sound as long as its not 0
-	
-	uint8_t V[16]; //16 one byte general purpose registers. 
-			     //V[15] or VF is used as a flag register
-	//4kb of mem, initialized with fonts
-	
 	uint8_t font[80] = {	
 
 		0xF0, 0x90, 0x90, 0x90, 0xF0, // 0
@@ -50,257 +31,217 @@
 		0xF0, 0x80, 0xF0, 0x80, 0x80  // F	
 	
 	};
-
-	void init_chip8(){
-		memset(mem, 0, sizeof(mem));
-		memset(stack, 0, sizeof(stack));
-		memset(V, 0, sizeof(V));
-		
-		memcpy(mem, font, sizeof(font));
-
-		return;
-	}
-
-	void load_rom(char* file){
-		FILE* rom;
-
-		rom = fopen(file, "rb");//open file to read binary
-					
-		if(rom == NULL){
-			printf("Failed to open ROM\n");
-			exit(EXIT_FAILURE);
-		}
-		
-		fseek(rom, 0, SEEK_END);
-		int rom_size = ftell(rom);
-
-		if(rom_size + 0x200 > 4096){
-			printf("Rom exceedes 4096kb mem size");
-			exit(EXIT_FAILURE);
-		}
-		
-		rewind(rom);
-		fread(&mem[0x200],sizeof(uint8_t),sizeof(&mem) - 0x200, rom);
-		fclose(rom);
-
-		return;
-
 	
-	}
+	memset(chip->mem, 0, sizeof(chip->mem));
+	memset(chip->stack, 0, sizeof(chip->stack));
+	memset(chip->V, 0, sizeof(chip->V));
+	
+	memcpy(chip->mem, font, sizeof(font));
 
-	bool emulate_cycle(){
-		uint16_t instruction =  (mem[pc] << 8) | (0x00FF & mem[pc+1]); //instruction is two bytes from memory 
-		pc += 2;
+	chip->pc = 0x200;
+	chip->i = 0;
+	chip->delay = 60;
+	chip->sound = 0;
 
-		//decode instruction, first break into nibbles
-		uint8_t nib1 = (instruction & 0xF000) >> 12;
-		uint8_t nib2 = (instruction & 0x0F00) >> 8;
-		uint8_t nib3 = (instruction & 0x00F0) >> 4;
-		uint8_t nib4 = (instruction & 0x000F);
+	return;
 
-		bool displayUpdated = 0;
-
-		switch(nib1){
-			case 0x0:
-				if(instruction == 0x00E0){//clear screen 
-					memset(display, 0, sizeof(display)); 	
-				}
-				displayUpdated = 1;
-				
-				break;
-
-			case 0x1://jump instruction 
-				pc = (instruction & 0x0FFF);
-				break;
-
-			case 0x6://set register value
-				V[nib2] = (instruction & 0x00FF);	
-				break;
-
-			case 0x7://add immediate to register
-				{
-				uint8_t number = (instruction & 0x00FF);
-
-				if(number == 0xFF){
-					V[nib2] += 1;
-				}else{
-					V[nib2] += (instruction & 0x00FF);
-				}
-
-				break;
-
-				}
-
-			case 0xA://set index register
-				i = (instruction & 0x0FFF);		
-				break;
-
-			case 0xD:{
-				 uint8_t yPos = V[nib3] & 31;
-				 V[15] = 0;
-				 
-				 for (uint8_t rows = 0; rows < nib4; rows++){
-					uint8_t currByte = mem[i + rows];
-					uint8_t getPixel = 0x80;
-					uint8_t xPos = V[nib2] & 63;
-
-					for(int pixel = 0; pixel < 8; pixel++){
-						uint16_t index = (64 * yPos) + xPos;
-
-						if(display[index] && ((getPixel & currByte)) >> (7 - pixel))//pixel is turned off
-							V[15] = 1;
-
-						display[index] = display[index] ^ (getPixel & currByte);	
-
-						if((xPos) == 63)
-							break;
-						xPos++;
-						getPixel = (getPixel >> 1);
-					}
-
-					if (yPos == 31) 
-						break;
-					yPos++;
- 
-				 }
-				displayUpdated = 1;
-				 
-				break;
-
-		}
-			default: 
-				 printf("Error: instruction not found");
-				 exit(EXIT_FAILURE);
-				 break;
-		}
-		return displayUpdated;
 }
-	void here(){
-		return;
+
+void load_rom(chip8 *chip, char* file){
+
+	FILE* rom;
+
+	rom = fopen(file, "rb");//open file to read binary
+				
+	if(rom == NULL){
+		printf("Failed to open ROM\n");
+		exit(EXIT_FAILURE);
 	}
+	
+	fseek(rom, 0, SEEK_END);
+	int rom_size = ftell(rom);
 
-	int main ( int argc, char* argv[]){
-		
-		if ( argc != 2 ){
-			printf("Incorrect usage: %s, <rom file>" , argv[0]);
-			exit(EXIT_FAILURE);
-		} 
+	if(rom_size + 0x200 > 4096){
+		printf("Rom exceedes 4096kb mem size");
+		exit(EXIT_FAILURE);
+	}
+	
+	rewind(rom);
+	fread(&(chip->mem[0x200]),sizeof(uint8_t),rom_size, rom);
+	fclose(rom);
 
-		init_chip8();
-		
-		load_rom(argv[1]);
+	return;
+}
 
-		printf("\nROM loaded!");
-		//rom now loaded into memory
-		//set up SDL display
-		if (SDL_Init(SDL_INIT_VIDEO)!= 0){
+uint16_t fetch(chip8 *chip){
+	uint16_t instruction = ((chip->mem[chip->pc] << 8) | (0x00FF & chip->mem[(chip->pc)+1]));
+	chip->pc += 2;
+	
+	return instruction; 
+}
 
-			printf("error initializing SD: %s\n", SDL_GetError());
-			return 1;
+bool decodeAndExecute(chip8 *chip, uint16_t opcode){	
 
-		  }
+	uint8_t nib1 = (opcode & 0xF000) >> 12;
+	uint8_t nib2 = (opcode & 0x0F00) >> 8;
+	uint8_t nib3 = (opcode & 0x00F0) >> 4;
+	uint8_t nib4 = (opcode & 0x000F);
 
-		SDL_Window *win = SDL_CreateWindow("chip8",SDL_WINDOWPOS_CENTERED,SDL_WINDOWPOS_CENTERED,640,480,0);
-		
-		printf("\nWindow Created!");
+	bool updated = 0;
 
-		  if(!win){
-
-		    printf("error creating window%s\n",SDL_GetError() );
-		    SDL_Quit();
-		    return 1;
-
-		  }
-
-		unsigned int render_flags = SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC;
-
-		SDL_Renderer *rend = SDL_CreateRenderer(win,-1,render_flags);
-
-	  	if(!rend){
-		    printf("error creating renderer: %s\n",SDL_GetError());
-		    SDL_DestroyWindow(win);
-		    SDL_Quit();
-		    return 1;
-		  }
-		//SDL_RenderSetLogicalSize(rend, 64, 32);
-		SDL_RenderClear(rend);
-
-		//fetch instructions 
-		bool quit = 0;
-		
-		printf("\nRenderer initialilzed! Going into program loop...");
-
-		uint64_t onesecond = 0;
-		const uint64_t targetClockFrequency = 1.0/1000000.0;
-		uint64_t elapsed;
-		SDL_Event e;
-		struct timespec start, end;
-
-		SDL_Rect big_pixel;
-		big_pixel.w = 10;
-		big_pixel.h = 10;
-
-		while(!quit){
-			while(SDL_PollEvent(&e)){
-				if(e.type == SDL_QUIT){
-					quit = 1;
-				}
+	switch(nib1){
+		case 0x0://clear screen
+			if(opcode == 0x00E0){
+				memset(chip->display, 0, sizeof(chip->display));
+				updated = 1;
 			}
 
-			clock_gettime(CLOCK_MONOTONIC, &start);
+			break;
 
-			bool displayUpdated = emulate_cycle();
+		case 0x1://jump instruction
+			chip->pc = (opcode & 0x0FFF);
+			break;
 
-			here();
+		case 0x6:
+			chip->V[nib2] = (opcode & 0x00FF);
+			break;
+		case 0x7:
+			chip->V[nib2] += (opcode & 0x00FF);
+			break;
 
-			if(displayUpdated){
+		case 0xA:
+			chip->i = (opcode & 0x0FFF);
+			break;
+		case 0xD:{
+			uint8_t yPos = chip->V[nib3] & 31;
+			chip->V[15] = 0;
 
-				SDL_SetRenderDrawColor(rend,0,0,0,1);
-				SDL_RenderClear(rend);
-				SDL_SetRenderDrawColor(rend,255,255,255,1);
+			for(uint8_t row = 0; row < nib4; row++){
+				uint8_t currByte = chip->mem[chip->i + row];
+				uint8_t getPixel = 0x80;
+				uint8_t xPos = chip->V[nib2] & 63;
 
-				for (int i = 0; i < (64 * 32); i++){
-					if(display[i]){
-						big_pixel.x = (i % 64)* 10;
-						big_pixel.y = (i / 32)* 5;
-						SDL_RenderDrawRect(rend, &big_pixel);
-						SDL_RenderFillRect(rend, &big_pixel);
+				for(uint8_t pixel = 0; pixel < 8; pixel++){
+					uint16_t index = (64 * yPos) + xPos;
+
+					if(chip->display[index] && ((getPixel & currByte)) >> (7 - pixel)){
+						chip->V[15] = 1;
 					}
+
+					chip->display[index] = chip->display[index] ^ (getPixel & currByte);
+
+					if((xPos) == 63) 
+						break;
+					xPos++;
+					getPixel = (getPixel >> 1);
+
 				}
-				SDL_RenderPresent(rend);
+
+				if ( yPos == 31 ) 
+					break;
+
+				yPos++;
 			}
 
-			clock_gettime(CLOCK_MONOTONIC, &end);
-
-			if(onesecond > (1/1e9) && delay > 0){
-				delay--;
-				onesecond = 0;
-			}
-			
-			elapsed = (( end.tv_sec - start.tv_sec ) + (( end.tv_nsec - start.tv_nsec ) ) / 1e9);
-			onesecond += elapsed;
-/*
-			if(elapsed < targetClockFrequency){
-				struct timespec sleep_time;
-				sleep_time.tv_sec = 0;
-				sleep_time.tv_nsec = ((targetClockFrequency)- elapsed) / 1e9;
-				onesecond += sleep_time.tv_nsec;
-
-				SDL_DelayNS(sleep_time.tv_nsec);
-			}
-*/
-
-
+			updated = 1;
+			break;
 
 		}
 
-		SDL_DestroyRenderer(rend);
+		default:
+			 printf("Error: instruction not found");
+			 exit(EXIT_FAILURE);
+			 break;
+
+			}
+	return updated;
+}
+
+void updateScreen(SDL_Renderer *rend, SDL_Texture *tex, bool screen[64 * 32]){
+
+	uint32_t display[64 * 32];
+
+	for (int i = 0; i < (64 * 32); i++){
+		display[i] = screen[i] ? 0xFFFFFFFF : 0x0; 
+	}
+
+	SDL_UpdateTexture(tex, NULL, display, 64 * sizeof( uint32_t ));
+
+
+	SDL_RenderClear(rend);
+	SDL_RenderCopy(rend,tex, NULL, NULL);
+	SDL_RenderPresent(rend);
+
+ 	return;
+}
+
+int main ( int argc, char* argv[]){
+
+	if ( argc != 2 ){
+		printf("Incorrect usage: %s, <rom file>" , argv[0]);
+		exit(EXIT_FAILURE);
+	}
+
+	chip8 chip;
+
+	init_chip8(&chip);
+	load_rom(&chip, argv[1]);
+
+	printf("\nROM loaded!");
+
+	if(SDL_Init(SDL_INIT_VIDEO) != 0){
+		printf("error initializing SDL: %s\n", SDL_GetError());
+		return 1;
+	}
+
+	unsigned int window_flags = SDL_WINDOW_SHOWN | SDL_WINDOW_OPENGL | SDL_WINDOW_ALLOW_HIGHDPI;
+
+	SDL_Window *win = SDL_CreateWindow("chip8", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, 640, 320, window_flags);
+
+	printf("\nWindow Created!");
+
+
+
+	if(!win){
+
+		printf("Error creating SDL window%s\n",SDL_GetError() );		
+		SDL_Quit();
+		return 1;
+
+	  }
+
+	unsigned int render_flags = SDL_RENDERER_ACCELERATED;
+
+	SDL_Renderer *rend = SDL_CreateRenderer(win, -1, render_flags);
+
+	if(!rend){ printf("Error creating renderer: %s\n", SDL_GetError());
 		SDL_DestroyWindow(win);
 		SDL_Quit();
+		return 1;
+	}
 
-		return 0;
+	SDL_Texture *tex = SDL_CreateTexture(rend, SDL_PIXELFORMAT_RGBA8888, SDL_TEXTUREACCESS_STREAMING, 64, 32);
+	
+	bool quit = 0;
+	SDL_Event e;
+
+	while(!quit){
+		while(SDL_PollEvent(&e)){
+			if(e.type == SDL_QUIT){
+				quit = 1;
+			}
+		}
+		
+		uint16_t instruction = fetch(&chip);
+		bool screenUpdated = decodeAndExecute(&chip, instruction);
+
+		if(screenUpdated){
+			updateScreen(rend, tex, chip.display);
+		}
 
 	}
 
-	
 
+
+	return 0; 
+}

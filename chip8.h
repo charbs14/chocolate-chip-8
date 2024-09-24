@@ -1,6 +1,3 @@
-#ifndef CHIP8_H
-#define CHIP8_H
-
 #include <stdint.h>
 #include <stdbool.h>
 #include <stdio.h>
@@ -18,9 +15,9 @@ typedef struct chip8 {
 	uint8_t V[16];
 
 } chip8;
-	
-	void load_rom(char* file);
-	bool** chip8_cycle();
 
+	void init_chip8(chip8 *chip);
+	void load_rom(chip8 *chip, char* file);
+	uint16_t fetch(chip8 *chip ); //fetch opcode from memory, return two word opcode
+	bool decodeAndExecute(chip8 *chip, uint16_t opcode ); //executes process, returns 0 if display was not updaetd, otherwise returns 1
 	
-#endif
