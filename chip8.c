@@ -9,6 +9,8 @@
 #include <time.h>
 #include "chip8.h"
 
+#define VERSION_TOGGLE 1
+
 void init_chip8(chip8* chip){
 
 	uint8_t font[80] = {	
@@ -40,8 +42,9 @@ void init_chip8(chip8* chip){
 
 	chip->pc = 0x200;
 	chip->i = 0;
-	chip->delay = 60;
+	chip->delay = 0;
 	chip->sound = 0;
+	chip->sp = (chip->stack);
 
 	return;
 
@@ -80,7 +83,7 @@ uint16_t fetch(chip8 *chip){
 	return instruction; 
 }
 
-bool decodeAndExecute(chip8 *chip, uint16_t opcode){	
+bool decodeAndExecute(chip8 *chip, uint16_t opcode, uint8_t keypress){	
 
 	uint8_t nib1 = (opcode & 0xF000) >> 12;
 	uint8_t nib2 = (opcode & 0x0F00) >> 8;
@@ -90,10 +93,14 @@ bool decodeAndExecute(chip8 *chip, uint16_t opcode){
 	bool updated = 0;
 
 	switch(nib1){
-		case 0x0://clear screen
-			if(opcode == 0x00E0){
+		case 0x0:
+			if(nib4 == 0x0){ //clear screen
 				memset(chip->display, 0, sizeof(chip->display));
 				updated = 1;
+				break;
+			}else if(nib4 == 0xE){//pop from stack
+				 chip->pc = *(chip->sp);
+				 chip->sp--;
 			}
 
 			break;
@@ -102,16 +109,121 @@ bool decodeAndExecute(chip8 *chip, uint16_t opcode){
 			chip->pc = (opcode & 0x0FFF);
 			break;
 
+		case 0x2://Call subroutine
+			chip->sp++;
+			*(chip->sp) = chip->pc;
+			chip->pc = (opcode & 0x0FFF);
+			break;
+
+		case 0x3:
+			if(chip->V[nib2] == (opcode & 0x00FF)){
+				chip->pc += 2;
+			}
+			break;
+
+		case 0x4:
+			if(chip->V[nib2] != (opcode & 0x00FF)){
+				chip->pc += 2;
+			}
+			break;
+
+		case 0x5:
+			if(chip->V[nib2] == chip->V[nib3]){
+				chip->pc += 2;
+			}
+			break;
+
 		case 0x6:
 			chip->V[nib2] = (opcode & 0x00FF);
 			break;
+
 		case 0x7:
 			chip->V[nib2] += (opcode & 0x00FF);
 			break;
+		
+		case 0x9:
+			if(chip->V[nib2] != chip->V[nib3]){
+				chip->pc += 2;
+			}
+
+			break;
+		case 0x8:
+			switch(nib4){
+				case 0x0:
+					chip->V[nib2] = chip->V[nib3];
+					break;
+
+				case 0x1:
+					chip->V[nib2] = chip->V[nib2] | chip->V[nib3];
+					break;
+
+				case 0x2:
+					chip->V[nib2] = chip->V[nib2] & chip->V[nib3];
+					break;
+
+				case 0x3:
+					chip->V[nib2] = chip->V[nib2] ^ chip->V[nib3];
+					break;
+				
+				case 0x4:
+					chip->V[0xF] = 0;
+					uint32_t sum = chip->V[nib2] + chip->V[nib3];
+
+					if( sum  > 255 )
+						chip->V[0xF] = 1;
+
+					chip->V[nib2] = chip->V[nib2] + chip->V[nib3];
+
+					break;
+
+				case 0x5:
+					chip->V[0xF] = 0;
+					if(chip->V[nib2] > chip->V[nib3])
+						chip->V[0xF] = 1;
+
+					chip->V[nib2] = chip->V[nib2] - chip->V[nib3];
+					break;
+
+				case 0x6:
+					if(VERSION_TOGGLE){
+						chip->V[nib2] = chip->V[nib3];
+					}
+					chip->V[0xF] = 0b00000001 & chip->V[nib2];
+					chip->V[nib2] = chip->V[nib2] >> 1;
+					break;
+
+				case 0x7:
+					chip->V[0xF] = 0;
+					if(chip->V[nib3] > chip->V[nib2])
+						chip->V[0xF] = 1;
+
+					chip->V[nib2] = chip->V[nib3] - chip->V[nib2];
+
+					break;
+
+				case 0xE:
+					if(VERSION_TOGGLE){
+						chip->V[nib2] = chip->V[nib3];
+					}
+					chip->V[0xF] = 0b10000000 & chip->V[nib2];
+					chip->V[nib2] = chip->V[nib2] << 1;
+					break;
+
+
+			}
 
 		case 0xA:
 			chip->i = (opcode & 0x0FFF);
 			break;
+		
+		case 0xB:
+			chip->pc = (opcode & 0x0FFF) + chip->V[0];
+			break;
+
+		case 0xC:
+			chip->V[nib2] = rand() & (opcode & 0x00FF);
+			break;
+
 		case 0xD:{
 			uint8_t yPos = chip->V[nib3] & 31;
 			chip->V[15] = 0;
@@ -128,7 +240,7 @@ bool decodeAndExecute(chip8 *chip, uint16_t opcode){
 						chip->V[15] = 1;
 					}
 
-					chip->display[index] = chip->display[index] ^ (getPixel & currByte);
+					chip->display[index] = (chip->display[index] ^ (getPixel & currByte)) ? 0xFFFFFFFF : 0x0;
 
 					if((xPos) == 63) 
 						break;
@@ -147,6 +259,80 @@ bool decodeAndExecute(chip8 *chip, uint16_t opcode){
 			break;
 
 		}
+		
+		case 0xE:
+			switch( opcode	& 0x00FF ) {
+				case 0x9E:
+					if(keypress == chip->V[nib2])
+						chip->pc += 2;
+					break;
+				case 0xA1:
+					if(keypress != chip->V[nib2])
+						chip->pc += 2;
+					break;
+
+			}
+			break;
+		case 0xF:
+			switch( opcode & 0x00FF ){
+				case 0x07:
+					chip->V[nib2] = chip->delay;
+					break;
+				case 0x15:
+					chip->delay = chip->V[nib2];
+					break;
+				case 0x18:
+					chip->sound = chip->V[nib2];
+					break;
+				case 0x1E:
+					chip->i += chip->V[nib2];
+					break;
+				case 0x0A:
+					if(keypress == 169){
+						chip->pc -= 2;
+					}
+					chip->V[nib2] = keypress;
+
+					break;
+				case 0x29:
+					chip->i = 5 * chip->V[nib2];
+					break;
+				case 0x33:{
+					uint8_t num = chip->V[nib2];
+					uint8_t power = 1;
+					uint8_t offset = 0;
+
+					while(num > power)
+						power *= 10;
+
+					power /= 10;
+
+					while (num){
+						chip->mem[chip->i + offset] = num / power;
+						num = num - (power * (chip->mem[chip->i + offset]));
+						power /= 10;
+						offset++;
+					}
+
+					}
+
+					  
+					
+					break;
+				case 0x55:
+					for (uint8_t j = 0; j <= nib2; j++){
+						chip->mem[chip->i + j] = chip->V[j];
+					}
+					break;
+				case 0x65:
+					for (uint8_t j = 0; j <= nib2; j++){
+						chip->V[j] = chip->mem[chip->i + j];
+					}
+					break;
+
+			}
+			break;
+			 
 
 		default:
 			 printf("Error: instruction not found");
@@ -157,15 +343,10 @@ bool decodeAndExecute(chip8 *chip, uint16_t opcode){
 	return updated;
 }
 
-void updateScreen(SDL_Renderer *rend, SDL_Texture *tex, bool screen[64 * 32]){
+void updateScreen(SDL_Renderer *rend, SDL_Texture *tex, uint32_t screen[64 * 32]){
 
-	uint32_t display[64 * 32];
 
-	for (int i = 0; i < (64 * 32); i++){
-		display[i] = screen[i] ? 0xFFFFFFFF : 0x0; 
-	}
-
-	SDL_UpdateTexture(tex, NULL, display, 64 * sizeof( uint32_t ));
+	SDL_UpdateTexture(tex, NULL, screen, 64 * sizeof( uint32_t ));
 
 
 	SDL_RenderClear(rend);
@@ -173,6 +354,45 @@ void updateScreen(SDL_Renderer *rend, SDL_Texture *tex, bool screen[64 * 32]){
 	SDL_RenderPresent(rend);
 
  	return;
+}
+uint8_t getKeyHex(SDL_Event *e){
+	switch(e->key.keysym.scancode){
+		case SDL_SCANCODE_0:
+			return 0;
+		case SDL_SCANCODE_1:
+			return 1;
+		case SDL_SCANCODE_2:
+			return 2;
+		case SDL_SCANCODE_3:
+			return 3;
+		case SDL_SCANCODE_4:
+			return 4;
+		case SDL_SCANCODE_5:
+			return 5;
+		case SDL_SCANCODE_6:
+			return 6;
+		case SDL_SCANCODE_7:
+			return 7;
+		case SDL_SCANCODE_8:
+			return 8;
+		case SDL_SCANCODE_9:
+			return 9;
+		case SDL_SCANCODE_A:
+			return 10;
+		case SDL_SCANCODE_B:
+			return 11;
+		case SDL_SCANCODE_C:
+			return 12;
+		case SDL_SCANCODE_D:
+			return 13;
+		case SDL_SCANCODE_E:
+			return 14;
+		case SDL_SCANCODE_F:
+			return 15;
+		default:
+			return 169;
+
+	}
 }
 
 int main ( int argc, char* argv[]){
@@ -224,16 +444,28 @@ int main ( int argc, char* argv[]){
 	
 	bool quit = 0;
 	SDL_Event e;
+	uint32_t elapsed = 0;
 
 	while(!quit){
+		uint8_t keypress = 169;
+		uint32_t start = SDL_GetTicks();
 		while(SDL_PollEvent(&e)){
 			if(e.type == SDL_QUIT){
 				quit = 1;
+			}else if(e.type == SDL_KEYDOWN){
+				keypress = getKeyHex(&e);
 			}
 		}
 		
 		uint16_t instruction = fetch(&chip);
-		bool screenUpdated = decodeAndExecute(&chip, instruction);
+		bool screenUpdated = decodeAndExecute(&chip, instruction, keypress);
+		uint32_t end = SDL_GetTicks();
+		elapsed += (end - start);
+		if (elapsed >= (1000/60)) {
+			if (chip.delay != 0)
+				chip.delay--;
+			elapsed = 0;
+		}
 
 		if(screenUpdated){
 			updateScreen(rend, tex, chip.display);
@@ -242,6 +474,6 @@ int main ( int argc, char* argv[]){
 	}
 
 
-
+	SDL_Delay(1000/60);
 	return 0; 
 }
