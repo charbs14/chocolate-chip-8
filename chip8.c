@@ -9,7 +9,7 @@
 #include <time.h>
 #include "chip8.h"
 
-#define VERSION_TOGGLE 1
+#define VERSION_TOGGLE 0
 
 void init_chip8(chip8* chip){
 
@@ -37,6 +37,7 @@ void init_chip8(chip8* chip){
 	memset(chip->mem, 0, sizeof(chip->mem));
 	memset(chip->stack, 0, sizeof(chip->stack));
 	memset(chip->V, 0, sizeof(chip->V));
+	memset(chip->display, 0, sizeof(chip->display));
 	
 	memcpy(chip->mem, font, sizeof(font));
 
@@ -44,7 +45,7 @@ void init_chip8(chip8* chip){
 	chip->i = 0;
 	chip->delay = 0;
 	chip->sound = 0;
-	chip->sp = (chip->stack);
+	chip->sp = &(chip->stack[0]);
 
 	return;
 
@@ -172,13 +173,13 @@ bool decodeAndExecute(chip8 *chip, uint16_t opcode, uint8_t keypress){
 					if( sum  > 255 )
 						chip->V[0xF] = 1;
 
-					chip->V[nib2] = chip->V[nib2] + chip->V[nib3];
+					chip->V[nib2] = sum & 0xFF;
 
 					break;
 
 				case 0x5:
 					chip->V[0xF] = 0;
-					if(chip->V[nib2] > chip->V[nib3])
+					if(chip->V[nib2] >= chip->V[nib3])
 						chip->V[0xF] = 1;
 
 					chip->V[nib2] = chip->V[nib2] - chip->V[nib3];
@@ -194,7 +195,7 @@ bool decodeAndExecute(chip8 *chip, uint16_t opcode, uint8_t keypress){
 
 				case 0x7:
 					chip->V[0xF] = 0;
-					if(chip->V[nib3] > chip->V[nib2])
+					if(chip->V[nib3] >= chip->V[nib2])
 						chip->V[0xF] = 1;
 
 					chip->V[nib2] = chip->V[nib3] - chip->V[nib2];
@@ -205,7 +206,7 @@ bool decodeAndExecute(chip8 *chip, uint16_t opcode, uint8_t keypress){
 					if(VERSION_TOGGLE){
 						chip->V[nib2] = chip->V[nib3];
 					}
-					chip->V[0xF] = 0b10000000 & chip->V[nib2];
+					chip->V[0xF] = chip->V[nib2] >> 7;
 					chip->V[nib2] = chip->V[nib2] << 1;
 					break;
 
@@ -225,34 +226,39 @@ bool decodeAndExecute(chip8 *chip, uint16_t opcode, uint8_t keypress){
 			break;
 
 		case 0xD:{
-			uint8_t yPos = chip->V[nib3] & 31;
+			uint32_t x = chip->V[nib2] & 63;
+			uint32_t y = chip->V[nib3] & 31;
 			chip->V[15] = 0;
 
-			for(uint8_t row = 0; row < nib4; row++){
-				uint8_t currByte = chip->mem[chip->i + row];
-				uint8_t getPixel = 0x80;
-				uint8_t xPos = chip->V[nib2] & 63;
+			for(uint32_t row = 0; row < nib4; row++){
+				uint32_t currByte = chip->mem[chip->i + row];
+				uint32_t index = ((y + row) * 64) + x;
+				uint32_t pixelGrabber = 0x80;
+				for(uint32_t column= 0; column< 8; column++){
+					uint32_t currPixel;
+					if(chip->display[index])
+						currPixel = 1;
+					else
+						currPixel = 0;
 
-				for(uint8_t pixel = 0; pixel < 8; pixel++){
-					uint16_t index = (64 * yPos) + xPos;
+					uint32_t newPixel = (currByte & pixelGrabber) >> (7 - column);
 
-					if(chip->display[index] && ((getPixel & currByte)) >> (7 - pixel)){
-						chip->V[15] = 1;
+					if(currPixel && newPixel){
+						chip->V[0xF] = 1;
 					}
-
-					chip->display[index] = (chip->display[index] ^ (getPixel & currByte)) ? 0xFFFFFFFF : 0x0;
-
-					if((xPos) == 63) 
+					
+					chip->display[index] = (currPixel ^ newPixel) ? 0xFFFFFFFF:0x0;
+					
+					index++;
+					if((index - (64 * (y + row)))== 64)
 						break;
-					xPos++;
-					getPixel = (getPixel >> 1);
+					pixelGrabber = pixelGrabber >> 1;
 
 				}
 
-				if ( yPos == 31 ) 
+				if((y + row) == 31)
 					break;
 
-				yPos++;
 			}
 
 			updated = 1;
@@ -295,37 +301,26 @@ bool decodeAndExecute(chip8 *chip, uint16_t opcode, uint8_t keypress){
 
 					break;
 				case 0x29:
-					chip->i = 5 * chip->V[nib2];
+					chip->i = 5 * (chip->V[nib2] & 0x0F);
 					break;
 				case 0x33:{
-					uint8_t num = chip->V[nib2];
-					uint8_t power = 1;
-					uint8_t offset = 0;
-
-					while(num > power)
-						power *= 10;
-
-					power /= 10;
-
-					while (num){
-						chip->mem[chip->i + offset] = num / power;
-						num = num - (power * (chip->mem[chip->i + offset]));
-						power /= 10;
-						offset++;
-					}
-
-					}
-
+					int num = chip->V[nib2];
 					  
+					chip->mem[chip->i] = (num - (num % 100)) / 100;
+					num -= chip->mem[chip->i] * 100;
+					chip->mem[chip->i + 1] = (num - (num % 10)) / 10;
+					num -= chip->mem[chip->i + 1] * 10;
+					chip->mem[chip->i + 2] = num;
+					  }
 					
 					break;
 				case 0x55:
-					for (uint8_t j = 0; j <= nib2; j++){
+					for (int j = 0; j <= nib2; j++){
 						chip->mem[chip->i + j] = chip->V[j];
 					}
 					break;
 				case 0x65:
-					for (uint8_t j = 0; j <= nib2; j++){
+					for (int j = 0; j <= nib2; j++){
 						chip->V[j] = chip->mem[chip->i + j];
 					}
 					break;
